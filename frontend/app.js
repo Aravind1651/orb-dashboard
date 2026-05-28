@@ -244,18 +244,26 @@ function handleNewAlert(alert) {
   renderAlerts();
 
   // Toast + sound
-  const isBuy  = alert.signal_type === 'BUY';
-  const isSell = alert.signal_type === 'SELL';
-  const isSL   = alert.signal_type === 'SL_HIT';
-  const isTP   = alert.signal_type === 'TP_HIT';
+  const isBuy   = alert.signal_type === 'BUY';
+  const isSell  = alert.signal_type === 'SELL';
+  const isSL    = alert.signal_type === 'SL_HIT';
+  const isTP    = alert.signal_type === 'TP_HIT';
+  const isSqOff = alert.signal_type === 'SQUARE_OFF';
 
-  const emoji = isBuy ? '📈' : isSell ? '📉' : isSL ? '🛑' : isTP ? '🎯' : '⚡';
-  const title = `${emoji} ${alert.signal_type} — ${alert.display_name}`;
-  const msg   = isBuy || isSell
-    ? `Entry: ₹${fmt(alert.entry_price)}  SL: ₹${fmt(alert.stop_loss)}  TP: ₹${fmt(alert.target_price)}`
-    : `@ ₹${fmt(alert.entry_price)}`;
+  const emoji = isBuy ? '📈' : isSell ? '📉' : isSL ? '🛑' : isTP ? '🎯' : '⏹';
+  const title = `${emoji} ${alert.signal_type.replace('_', ' ')} — ${alert.display_name}`;
 
-  const toastType = isBuy ? 'buy' : isSell ? 'sell' : 'info';
+  let msg;
+  if (isBuy || isSell) {
+    msg = `Entry: ₹${fmt(alert.entry_price)}  SL: ₹${fmt(alert.stop_loss)}  TP: ₹${fmt(alert.target_price)}`;
+  } else if (alert.pnl_points != null) {
+    const sign = alert.pnl_points >= 0 ? '+' : '';
+    msg = `Exit: ₹${fmt(alert.entry_price)}  P&L: ${sign}${fmt(alert.pnl_points)} pts (${sign}${alert.pnl_percent}%)`;
+  } else {
+    msg = `@ ₹${fmt(alert.entry_price)}`;
+  }
+
+  const toastType = isBuy ? 'buy' : isSell ? 'sell' : (alert.pnl_points >= 0 ? 'profit' : 'loss');
   showToast(title, msg, toastType);
 
   if (state.soundEnabled) playAlertSound(isBuy, isSell);
@@ -416,6 +424,11 @@ function createEmptyState() {
 }
 
 function alertCardHTML(a) {
+  const isEntry  = a.signal_type === 'BUY' || a.signal_type === 'SELL';
+  const isExit   = ['SL_HIT', 'TP_HIT', 'SQUARE_OFF'].includes(a.signal_type);
+  const isProfit = a.pnl_points != null && a.pnl_points >= 0;
+  const isLoss   = a.pnl_points != null && a.pnl_points < 0;
+
   const typeClass =
     a.signal_type === 'BUY'        ? 'buy'        :
     a.signal_type === 'SELL'       ? 'sell'       :
@@ -424,15 +437,17 @@ function alertCardHTML(a) {
     a.signal_type === 'SQUARE_OFF' ? 'square-off' : '';
 
   const badgeText =
-    a.signal_type === 'BUY'        ? '↑ BUY'       :
-    a.signal_type === 'SELL'       ? '↓ SELL'      :
-    a.signal_type === 'SL_HIT'     ? '✕ SL Hit'    :
-    a.signal_type === 'TP_HIT'     ? '✓ TP Hit'    :
-    a.signal_type === 'SQUARE_OFF' ? '⏹ Square Off': a.signal_type;
+    a.signal_type === 'BUY'        ? '↑ BUY'        :
+    a.signal_type === 'SELL'       ? '↓ SELL'       :
+    a.signal_type === 'SL_HIT'     ? '✕ SL Hit'     :
+    a.signal_type === 'TP_HIT'     ? '✓ TP Hit'     :
+    a.signal_type === 'SQUARE_OFF' ? '⏹ Square Off' : a.signal_type;
 
   const timeStr = fmtTime(a.timestamp);
+  const sign    = a.pnl_points >= 0 ? '+' : '';
 
-  const pricesHTML = (a.signal_type === 'BUY' || a.signal_type === 'SELL') ? `
+  // ── Entry card (BUY / SELL) ────────────────────────────────────
+  const pricesHTML = isEntry ? `
     <div class="alert-prices">
       <div class="price-item">
         <span class="price-label">Entry</span>
@@ -450,8 +465,38 @@ function alertCardHTML(a) {
         <span class="price-label">R:R</span>
         <span class="price-val rr">1:${a.risk_reward}</span>
       </div>` : ''}
-    </div>` : `
+    </div>`
+
+  // ── Exit card (SL_HIT / TP_HIT / SQUARE_OFF) ──────────────────
+  : isExit ? `
     <div class="alert-prices">
+      ${a.original_entry ? `<div class="price-item">
+        <span class="price-label">Entry was</span>
+        <span class="price-val entry">₹${fmt(a.original_entry)}</span>
+      </div>` : ''}
+      <div class="price-item">
+        <span class="price-label">Exit Price</span>
+        <span class="price-val entry">₹${fmt(a.entry_price)}</span>
+      </div>
+      ${a.direction ? `<div class="price-item">
+        <span class="price-label">Direction</span>
+        <span class="price-val" style="color:${a.direction==='LONG'?'var(--green)':'var(--red)'}">${a.direction}</span>
+      </div>` : ''}
+    </div>
+    ${a.pnl_points != null ? `
+    <div class="pnl-block ${isProfit ? 'profit' : 'loss'}">
+      <div class="pnl-main">
+        <span class="pnl-label">P&amp;L</span>
+        <span class="pnl-points">${sign}₹${fmt(Math.abs(a.pnl_points))} pts</span>
+        <span class="pnl-percent">${sign}${a.pnl_percent}%</span>
+      </div>
+      <div class="pnl-result-badge ${isProfit ? 'profit' : 'loss'}">
+        ${isProfit ? '▲ PROFIT' : '▼ LOSS'}
+      </div>
+    </div>` : ''}`
+
+  // ── Fallback ───────────────────────────────────────────────────
+  : `<div class="alert-prices">
       <div class="price-item">
         <span class="price-label">Price</span>
         <span class="price-val entry">₹${fmt(a.entry_price)}</span>

@@ -35,9 +35,13 @@ async def init_db():
                 display_name TEXT NOT NULL,
                 signal_type TEXT NOT NULL,
                 entry_price REAL NOT NULL,
+                original_entry REAL,
+                direction TEXT,
                 stop_loss REAL,
                 target_price REAL,
                 risk_reward REAL,
+                pnl_points REAL,
+                pnl_percent REAL,
                 atr REAL,
                 range_high REAL,
                 range_low REAL,
@@ -53,9 +57,13 @@ async def init_db():
                 display_name TEXT NOT NULL,
                 signal_type TEXT NOT NULL,
                 entry_price REAL NOT NULL,
+                original_entry REAL,
+                direction TEXT,
                 stop_loss REAL,
                 target_price REAL,
                 risk_reward REAL,
+                pnl_points REAL,
+                pnl_percent REAL,
                 atr REAL,
                 range_high REAL,
                 range_low REAL,
@@ -86,16 +94,27 @@ async def init_db():
 async def save_alert(alert: dict) -> int:
     """Save a new alert to today's alerts table."""
     async with aiosqlite.connect(DB_PATH) as db:
+        # Auto-add new columns if DB was created before this migration
+        for col, coltype in [("original_entry", "REAL"), ("direction", "TEXT"),
+                             ("pnl_points", "REAL"), ("pnl_percent", "REAL")]:
+            try:
+                await db.execute(f"ALTER TABLE alerts ADD COLUMN {col} {coltype}")
+                await db.commit()
+            except Exception:
+                pass  # Column already exists
+
         cursor = await db.execute("""
             INSERT INTO alerts (symbol, display_name, signal_type, entry_price,
-                stop_loss, target_price, risk_reward, atr, range_high, range_low,
+                original_entry, direction, stop_loss, target_price, risk_reward,
+                pnl_points, pnl_percent, atr, range_high, range_low,
                 timestamp, date, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             alert["symbol"], alert["display_name"], alert["signal_type"],
-            alert["entry_price"], alert.get("stop_loss"), alert.get("target_price"),
-            alert.get("risk_reward"), alert.get("atr"),
-            alert.get("range_high"), alert.get("range_low"),
+            alert["entry_price"], alert.get("original_entry"), alert.get("direction"),
+            alert.get("stop_loss"), alert.get("target_price"),
+            alert.get("risk_reward"), alert.get("pnl_points"), alert.get("pnl_percent"),
+            alert.get("atr"), alert.get("range_high"), alert.get("range_low"),
             alert["timestamp"], alert["date"], alert.get("status", "ACTIVE")
         ))
         await db.commit()

@@ -248,12 +248,12 @@ class ORBEngine:
                     state, "SQUARE_OFF", close,
                     sl=None, tp=None
                 )
+                signals.append(signal)
+                logger.info(f"[{symbol}] Square off at {close}")
                 state.position = "FLAT"
                 state.entry_price = None
                 state.stop_loss = None
                 state.target_price = None
-                signals.append(signal)
-                logger.info(f"[{symbol}] Square off at {close}")
                 state.last_candle_time = candle_ist
                 continue
 
@@ -303,25 +303,37 @@ class ORBEngine:
                     if low <= state.stop_loss:
                         signal = self._build_signal(state, "SL_HIT", state.stop_loss, sl=None, tp=None)
                         signals.append(signal)
-                        state.position = "FLAT"
                         logger.info(f"[{symbol}] Stop Loss hit @ {state.stop_loss:.2f}")
+                        state.position = "FLAT"
+                        state.entry_price = None
+                        state.stop_loss = None
+                        state.target_price = None
                     elif high >= state.target_price:
                         signal = self._build_signal(state, "TP_HIT", state.target_price, sl=None, tp=None)
                         signals.append(signal)
-                        state.position = "FLAT"
                         logger.info(f"[{symbol}] Target hit @ {state.target_price:.2f}")
+                        state.position = "FLAT"
+                        state.entry_price = None
+                        state.stop_loss = None
+                        state.target_price = None
 
                 elif state.position == "SHORT" and state.stop_loss and state.target_price:
                     if high >= state.stop_loss:
                         signal = self._build_signal(state, "SL_HIT", state.stop_loss, sl=None, tp=None)
                         signals.append(signal)
-                        state.position = "FLAT"
                         logger.info(f"[{symbol}] Stop Loss hit @ {state.stop_loss:.2f}")
+                        state.position = "FLAT"
+                        state.entry_price = None
+                        state.stop_loss = None
+                        state.target_price = None
                     elif low <= state.target_price:
                         signal = self._build_signal(state, "TP_HIT", state.target_price, sl=None, tp=None)
                         signals.append(signal)
-                        state.position = "FLAT"
                         logger.info(f"[{symbol}] Target hit @ {state.target_price:.2f}")
+                        state.position = "FLAT"
+                        state.entry_price = None
+                        state.stop_loss = None
+                        state.target_price = None
 
             state.last_candle_time = candle_ist
 
@@ -331,29 +343,48 @@ class ORBEngine:
                        price: float, sl: Optional[float], tp: Optional[float]) -> dict:
         """Build a signal dict from current state."""
         now_ist = datetime.now(IST)
+        is_entry = signal_type in ("BUY", "SELL")
+        is_exit  = signal_type in ("SL_HIT", "TP_HIT", "SQUARE_OFF")
+
+        # Risk:Reward for entry signals
         risk = None
         rr = None
-        if sl and tp and signal_type in ("BUY", "SELL"):
-            if signal_type == "BUY":
-                risk = price - sl
-            else:
-                risk = sl - price
+        if sl and tp and is_entry:
+            risk = (price - sl) if signal_type == "BUY" else (sl - price)
             rr = round(self.config["rr_ratio"], 2)
 
+        # P&L calculation for exit signals
+        pnl_points  = None
+        pnl_percent = None
+        direction   = state.position   # LONG / SHORT (still set before reset)
+        original_entry = state.entry_price
+
+        if is_exit and original_entry:
+            if direction == "LONG":
+                pnl_points = round(price - original_entry, 2)
+            elif direction == "SHORT":
+                pnl_points = round(original_entry - price, 2)
+            if pnl_points is not None:
+                pnl_percent = round((pnl_points / original_entry) * 100, 2)
+
         return {
-            "symbol": state.symbol,
-            "display_name": state.display_name,
-            "signal_type": signal_type,
-            "entry_price": round(price, 2),
-            "stop_loss": round(sl, 2) if sl else None,
-            "target_price": round(tp, 2) if tp else None,
-            "risk_reward": rr,
-            "atr": round(state.atr, 4) if state.atr else None,
-            "range_high": round(state.range_high, 2) if state.range_high else None,
-            "range_low": round(state.range_low, 2) if state.range_low else None,
-            "timestamp": now_ist.isoformat(),
-            "date": now_ist.date().isoformat(),
-            "status": "ACTIVE",
+            "symbol":         state.symbol,
+            "display_name":   state.display_name,
+            "signal_type":    signal_type,
+            "entry_price":    round(price, 2),
+            "original_entry": round(original_entry, 2) if original_entry else None,
+            "direction":      direction if is_exit else ("LONG" if signal_type == "BUY" else "SHORT" if signal_type == "SELL" else None),
+            "stop_loss":      round(sl, 2) if sl else None,
+            "target_price":   round(tp, 2) if tp else None,
+            "risk_reward":    rr,
+            "pnl_points":     pnl_points,
+            "pnl_percent":    pnl_percent,
+            "atr":            round(state.atr, 4) if state.atr else None,
+            "range_high":     round(state.range_high, 2) if state.range_high else None,
+            "range_low":      round(state.range_low, 2) if state.range_low else None,
+            "timestamp":      now_ist.isoformat(),
+            "date":           now_ist.date().isoformat(),
+            "status":         "ACTIVE",
         }
 
     def get_all_states(self) -> List[dict]:

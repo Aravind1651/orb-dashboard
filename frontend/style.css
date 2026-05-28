@@ -473,6 +473,65 @@ body::before {
 .alert-atr  { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
 .alert-or   { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 
+/* ── P&L Block ───────────────────────────────────────────────────── */
+.pnl-block {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 10px; padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+  animation: pnlPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes pnlPop {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.pnl-block.profit {
+  background: var(--green-dim);
+  border-color: rgba(0, 212, 170, 0.3);
+}
+.pnl-block.loss {
+  background: var(--red-dim);
+  border-color: rgba(255, 77, 109, 0.3);
+}
+
+.pnl-main { display: flex; align-items: baseline; gap: 10px; }
+.pnl-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.pnl-points {
+  font-size: 16px; font-weight: 800; font-family: var(--font-mono);
+  letter-spacing: -0.5px;
+}
+.pnl-block.profit .pnl-points { color: var(--green); }
+.pnl-block.loss   .pnl-points { color: var(--red); }
+
+.pnl-percent {
+  font-size: 12px; font-weight: 600; font-family: var(--font-mono);
+}
+.pnl-block.profit .pnl-percent { color: rgba(0, 212, 170, 0.7); }
+.pnl-block.loss   .pnl-percent { color: rgba(255, 77, 109, 0.7); }
+
+.pnl-result-badge {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.8px;
+  padding: 3px 9px; border-radius: 10px;
+}
+.pnl-result-badge.profit {
+  background: rgba(0, 212, 170, 0.15);
+  color: var(--green);
+  border: 1px solid rgba(0, 212, 170, 0.4);
+}
+.pnl-result-badge.loss {
+  background: rgba(255, 77, 109, 0.15);
+  color: var(--red);
+  border: 1px solid rgba(255, 77, 109, 0.4);
+}
+
+/* Toast profit/loss variants */
+.toast.profit::after { background: var(--green); }
+.toast.loss::after   { background: var(--red); }
+
+
 /* ── Empty State ─────────────────────────────────────────────────── */
 .empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
