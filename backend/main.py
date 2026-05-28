@@ -302,22 +302,46 @@ async def api_refresh():
 async def api_test_signal(symbol: str = "BSE.NS", signal_type: str = "BUY"):
     """
     DEV ONLY: Inject a test signal to verify UI rendering.
+    Supports: BUY, SELL, SL_HIT, TP_HIT, SQUARE_OFF
     """
     now_ist = datetime.now(IST)
+    is_exit = signal_type in ("SL_HIT", "TP_HIT", "SQUARE_OFF")
+
+    SIMULATED_ENTRY = 980.00
+    direction = "LONG"
+
+    exit_prices = {
+        "SL_HIT":     960.00,
+        "TP_HIT":     1040.00,
+        "SQUARE_OFF": 995.00,
+    }
+    exit_price = exit_prices.get(signal_type, 1000.00)
+
+    pnl_points  = round(exit_price - SIMULATED_ENTRY, 2) if is_exit else None
+    pnl_percent = round((pnl_points / SIMULATED_ENTRY) * 100, 2) if pnl_points is not None else None
+
+    display_names = {
+        "BSE.NS": "BSE Ltd", "SUZLON.NS": "Suzlon Energy",
+        "IFCI.NS": "IFCI",   "HFCL.NS": "HFCL", "TMCV.NS": "TMCV"
+    }
     test_signal = {
-        "symbol": symbol,
-        "display_name": symbol.split(".")[0],
-        "signal_type": signal_type,
-        "entry_price": 1000.00,
-        "stop_loss": 980.00,
-        "target_price": 1040.00,
-        "risk_reward": 2.0,
-        "atr": 15.5,
-        "range_high": 1005.00,
-        "range_low": 985.00,
-        "timestamp": now_ist.isoformat(),
-        "date": now_ist.date().isoformat(),
-        "status": "ACTIVE",
+        "symbol":         symbol,
+        "display_name":   display_names.get(symbol, symbol.split(".")[0]),
+        "signal_type":    signal_type,
+        "direction":      direction,
+        "entry_price":    exit_price if is_exit else 1000.00,
+        "original_entry": SIMULATED_ENTRY if is_exit else None,
+        "stop_loss":      960.00 if not is_exit else None,
+        "target_price":   1040.00 if not is_exit else None,
+        "risk_reward":    2.0 if not is_exit else None,
+        "pnl_points":     pnl_points,
+        "pnl_percent":    pnl_percent,
+        "atr":            15.50,
+        "range_high":     1005.00,
+        "range_low":      985.00,
+        "timestamp":      now_ist.isoformat(),
+        "date":           now_ist.date().isoformat(),
+        "status":         "ACTIVE",
     }
     alert_id = await save_alert(test_signal)
     test_signal["id"] = alert_id
