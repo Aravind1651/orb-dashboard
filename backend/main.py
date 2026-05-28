@@ -24,6 +24,7 @@ from backend.database import (
 )
 from backend.orb_engine import ORBEngine
 from backend.data_feed import DataFeed
+from backend.backtester import run_backtest, ALL_STOCKS
 
 # ─────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -361,3 +362,39 @@ async def health():
         "ws_connections": len(manager.active),
         "feed_running": data_feed._running if data_feed else False
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backtest Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/api/backtest/stocks")
+async def api_backtest_stocks():
+    """Return full stock list for backtest dropdown (tracked + Nifty 50)."""
+    return {"stocks": ALL_STOCKS}
+
+
+@app.get("/api/backtest")
+async def api_backtest(
+    symbol: str = Query("SUZLON.NS", description="Stock symbol e.g. SUZLON.NS"),
+    period: str = Query("1mo",       description="Period: 1d 1w 1mo 6mo 1y 2y"),
+):
+    """
+    Run ORB backtest for a symbol over a period.
+    Returns per-trade results and summary statistics.
+    """
+    valid_periods = {"1d", "1w", "1mo", "6mo", "1y", "2y"}
+    if period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Invalid period. Use one of: {valid_periods}")
+
+    cfg = await get_strategy_config()
+    config = {
+        "atr_length":     cfg.get("atr_length",     14),
+        "atr_multiplier": cfg.get("atr_multiplier", 1.0),
+        "rr_ratio":       cfg.get("rr_ratio",       2.0),
+    }
+    try:
+        result = await run_backtest(symbol=symbol, period=period, config=config)
+        return result
+    except Exception as e:
+        logger.error(f"Backtest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

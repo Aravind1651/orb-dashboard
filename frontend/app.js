@@ -803,3 +803,326 @@ function initSkeletonCards() {
 
 initSkeletonCards();
 connectWS();
+
+// =============================================================================
+// BACKTESTING MODULE
+// =============================================================================
+
+const btState = {
+  running: false,
+  result: null,
+  equityChart: null,
+};
+
+// -- DOM refs ------------------------------------------------------------------
+const btEl = {
+  modal:        document.getElementById('backtestModal'),
+  btnOpen:      document.getElementById('btnBacktest'),
+  btnClose:     document.getElementById('closeBacktest'),
+  btnRun:       document.getElementById('btnRunBacktest'),
+  btnExport:    document.getElementById('btnBtExport'),
+  symbol:       document.getElementById('btSymbol'),
+  period:       document.getElementById('btPeriod'),
+  nifty50Group: document.getElementById('nifty50Group'),
+  empty:        document.getElementById('btEmpty'),
+  loading:      document.getElementById('btLoading'),
+  loadingStock: document.getElementById('btLoadingStock'),
+  summary:      document.getElementById('btSummary'),
+  error:        document.getElementById('btError'),
+  errorMsg:     document.getElementById('btErrorMsg'),
+  statGrid:     document.getElementById('btStatGrid'),
+  summaryTitle: document.getElementById('btSummaryTitle'),
+  summarySubtitle: document.getElementById('btSummarySubtitle'),
+  tradeCount:   document.getElementById('btTradeCount'),
+  tableBody:    document.getElementById('btTableBody'),
+  canvas:       document.getElementById('btEquityCanvas'),
+};
+
+// -- Populate Nifty 50 dropdown ---------------------------------------------
+async function loadBacktestStocks() {
+  try {
+    const res  = await fetch(`${API_BASE}/backtest/stocks`);
+    const data = await res.json();
+    const nifty = data.stocks.filter(s => s.group === 'Nifty 50');
+    btEl.nifty50Group.innerHTML = nifty.map(
+      s => `<option value="${s.symbol}">${s.name}</option>`
+    ).join('');
+  } catch (e) {
+    console.warn('Could not load backtest stocks:', e);
+  }
+}
+
+// -- Modal open/close -------------------------------------------------------
+function openBacktestModal() {
+  btEl.modal.classList.add('open');
+  loadBacktestStocks();
+}
+function closeBacktestModal() {
+  btEl.modal.classList.remove('open');
+}
+
+btEl.btnOpen.addEventListener('click', openBacktestModal);
+btEl.btnClose.addEventListener('click', closeBacktestModal);
+btEl.modal.addEventListener('click', e => { if (e.target === btEl.modal) closeBacktestModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBacktestModal(); });
+
+// -- Show/hide results panels ----------------------------------------------
+function btShowPanel(which) {
+  ['empty','loading','summary','error'].forEach(p => {
+    btEl[p].style.display = p === which ? (p === 'summary' ? 'flex' : 'flex') : 'none';
+  });
+}
+
+// -- Run Backtest ----------------------------------------------------------
+btEl.btnRun.addEventListener('click', runBacktest);
+
+async function runBacktest() {
+  if (btState.running) return;
+  const symbol = btEl.symbol.value;
+  const period = btEl.period.value;
+  const symbolName = btEl.symbol.options[btEl.symbol.selectedIndex]?.text || symbol;
+
+  btState.running = true;
+  btEl.btnRun.disabled = true;
+  btEl.loadingStock.textContent = ` for ${symbolName}`;
+  btShowPanel('loading');
+
+  try {
+    const res = await fetch(`${API_BASE}/backtest?symbol=${encodeURIComponent(symbol)}&period=${period}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (data.summary && data.summary.error) {
+      btEl.errorMsg.textContent = data.summary.error;
+      btShowPanel('error');
+      return;
+    }
+
+    btState.result = data;
+    renderBacktestResults(data, symbolName);
+    btShowPanel('summary');
+
+  } catch (e) {
+    btEl.errorMsg.textContent = `Failed to run backtest: ${e.message}`;
+    btShowPanel('error');
+  } finally {
+    btState.running = false;
+    btEl.btnRun.disabled = false;
+  }
+}
+
+// -- Render Results --------------------------------------------------------
+function renderBacktestResults(data, symbolName) {
+  const s = data.summary;
+  const periodLabels = { '1d':'1 Day','1w':'1 Week','1mo':'1 Month','6mo':'6 Months','1y':'1 Year','2y':'2 Years' };
+
+  btEl.summaryTitle.textContent = `${symbolName} — ORB Backtest`;
+  btEl.summarySubtitle.textContent =
+    `${periodLabels[data.period] || data.period}  ·  ${s.start_date} ? ${s.end_date}  ·  ${s.interval_label}`;
+
+  // -- Stat cards ---------------------------------------------------------
+  const totalPnlClass = s.total_pnl >= 0 ? 'green' : 'red';
+  const totalPnlSign  = s.total_pnl >= 0 ? '+' : '';
+  const avgPnlSign    = s.avg_pnl   >= 0 ? '+' : '';
+  const winRateClass  = s.win_rate >= 50 ? 'green' : (s.win_rate >= 35 ? 'yellow' : 'red');
+
+  btEl.statGrid.innerHTML = `
+    <div class="bt-stat-card">
+      <div class="bt-stat-label">Total Trades</div>
+      <div class="bt-stat-value purple">${s.total_trades}</div>
+      <div class="bt-stat-sub">${s.longs}L / ${s.shorts}S</div>
+    </div>
+    <div class="bt-stat-card ${s.win_rate >= 50 ? 'win' : 'loss'}">
+      <div class="bt-stat-label">Win Rate</div>
+      <div class="bt-stat-value ${winRateClass}">${s.win_rate}%</div>
+      <div class="bt-stat-sub">${s.wins}W / ${s.losses}L</div>
+    </div>
+    <div class="bt-stat-card ${s.total_pnl >= 0 ? 'profit' : 'loss'}">
+      <div class="bt-stat-label">Total P&L</div>
+      <div class="bt-stat-value ${totalPnlClass}">${totalPnlSign}${fmt(Math.abs(s.total_pnl))}</div>
+      <div class="bt-stat-sub">pts</div>
+    </div>
+    <div class="bt-stat-card">
+      <div class="bt-stat-label">Avg per Trade</div>
+      <div class="bt-stat-value ${s.avg_pnl >= 0 ? 'green' : 'red'}">${avgPnlSign}${fmt(Math.abs(s.avg_pnl))}</div>
+      <div class="bt-stat-sub">pts/trade</div>
+    </div>
+    <div class="bt-stat-card win">
+      <div class="bt-stat-label">Best Trade</div>
+      <div class="bt-stat-value green">+${fmt(s.max_win)}</div>
+      <div class="bt-stat-sub">pts profit</div>
+    </div>
+    <div class="bt-stat-card loss">
+      <div class="bt-stat-label">Worst Trade</div>
+      <div class="bt-stat-value red">${fmt(s.max_loss)}</div>
+      <div class="bt-stat-sub">pts loss</div>
+    </div>
+    <div class="bt-stat-card">
+      <div class="bt-stat-label">TP Hits</div>
+      <div class="bt-stat-value green">${s.tp_hits}</div>
+      <div class="bt-stat-sub">target reached</div>
+    </div>
+    <div class="bt-stat-card">
+      <div class="bt-stat-label">SL Hits</div>
+      <div class="bt-stat-value red">${s.sl_hits}</div>
+      <div class="bt-stat-sub">stopped out</div>
+    </div>
+    <div class="bt-stat-card">
+      <div class="bt-stat-label">Square Offs</div>
+      <div class="bt-stat-value yellow">${s.square_offs}</div>
+      <div class="bt-stat-sub">at 3:15 PM</div>
+    </div>
+  `;
+
+  // -- Trade count badge --------------------------------------------------
+  btEl.tradeCount.textContent = `${data.trades.length} trades`;
+
+  // -- Equity curve chart -------------------------------------------------
+  renderEquityChart(data.trades);
+
+  // -- Trade table --------------------------------------------------------
+  if (!data.trades.length) {
+    btEl.tableBody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px">No trades taken in this period</td></tr>`;
+  } else {
+    btEl.tableBody.innerHTML = data.trades.map(t => {
+      const rowCls = t.result === 'WIN' ? 'row-win' : t.result === 'LOSS' ? 'row-loss' : '';
+      const dirCls = t.direction === 'LONG' ? 'bt-dir-long' : 'bt-dir-short';
+      const exitCls = t.exit_type === 'TP_HIT' ? 'bt-exit-tp' : t.exit_type === 'SL_HIT' ? 'bt-exit-sl' : 'bt-exit-sq';
+      const pnlCls  = t.pnl_points >= 0 ? 'bt-pnl-pos' : 'bt-pnl-neg';
+      const pnlSign = t.pnl_points >= 0 ? '+' : '';
+      const resCls  = t.result === 'WIN' ? 'bt-result-win' : t.result === 'LOSS' ? 'bt-result-loss' : 'bt-result-be';
+      const exitLabel = t.exit_type === 'TP_HIT' ? '? TP Hit' : t.exit_type === 'SL_HIT' ? '? SL Hit' : '? Sq.Off';
+      return `<tr class="${rowCls}">
+        <td>${t.date}</td>
+        <td class="${dirCls}">${t.direction === 'LONG' ? '? L' : '? S'}</td>
+        <td>?${fmt(t.entry)}</td>
+        <td>${t.entry_time}</td>
+        <td>?${fmt(t.exit)}</td>
+        <td>${t.exit_time}</td>
+        <td class="${exitCls}">${exitLabel}</td>
+        <td class="${pnlCls}">${pnlSign}${fmt(Math.abs(t.pnl_points))}</td>
+        <td class="${pnlCls}">${pnlSign}${t.pnl_percent}%</td>
+        <td><span class="${resCls}">${t.result}</span></td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+// -- Equity Curve (Canvas) -------------------------------------------------
+function renderEquityChart(trades) {
+  const canvas = btEl.canvas;
+  const ctx    = canvas.getContext('2d');
+  const wrap   = canvas.parentElement;
+
+  // Size canvas to wrapper
+  canvas.width  = wrap.clientWidth  - 24;
+  canvas.height = wrap.clientHeight - 24;
+
+  if (!trades.length) {
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.font = '13px Inter';
+    ctx.textAlign = 'center';
+    ctx.fillText('No trades to display', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const W = canvas.width, H = canvas.height;
+  const pad = { top: 16, right: 16, bottom: 28, left: 52 };
+  const chartW = W - pad.left - pad.right;
+  const chartH = H - pad.top - pad.bottom;
+
+  const values = [0, ...trades.map(t => t.cumulative_pnl)];
+  const minV   = Math.min(...values);
+  const maxV   = Math.max(...values);
+  const range  = maxV - minV || 1;
+
+  const xStep = chartW / (values.length - 1);
+  const yScale = v => pad.top + chartH - ((v - minV) / range) * chartH;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth   = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (chartH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+  }
+
+  // Zero line
+  const zeroY = yScale(0);
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(pad.left, zeroY); ctx.lineTo(W - pad.right, zeroY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Fill gradient
+  const isFinalProfit = values[values.length - 1] >= 0;
+  const grad = ctx.createLinearGradient(0, pad.top, 0, H - pad.bottom);
+  if (isFinalProfit) {
+    grad.addColorStop(0,   'rgba(0,212,170,0.3)');
+    grad.addColorStop(1,   'rgba(0,212,170,0.0)');
+  } else {
+    grad.addColorStop(0,   'rgba(255,77,109,0.3)');
+    grad.addColorStop(1,   'rgba(255,77,109,0.0)');
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(pad.left, yScale(values[0]));
+  values.forEach((v, i) => ctx.lineTo(pad.left + i * xStep, yScale(v)));
+  ctx.lineTo(pad.left + (values.length - 1) * xStep, H - pad.bottom);
+  ctx.lineTo(pad.left, H - pad.bottom);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = isFinalProfit ? '#00d4aa' : '#ff4d6d';
+  ctx.lineWidth   = 2;
+  ctx.lineJoin    = 'round';
+  values.forEach((v, i) => {
+    const x = pad.left + i * xStep;
+    const y = yScale(v);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Y axis labels
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'right';
+  [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+    const v = minV + range * (1 - f);
+    const y = pad.top + chartH * f;
+    ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(1), pad.left - 6, y + 4);
+  });
+
+  // End dot
+  const lastX = pad.left + (values.length - 1) * xStep;
+  const lastY = yScale(values[values.length - 1]);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = isFinalProfit ? '#00d4aa' : '#ff4d6d';
+  ctx.fill();
+}
+
+// -- Export CSV ------------------------------------------------------------
+btEl.btnExport.addEventListener('click', () => {
+  if (!btState.result) return;
+  const { trades, summary } = btState.result;
+  const rows = [
+    ['Date','Direction','Entry','Entry Time','Exit','Exit Time','Exit Type','P&L Points','P&L %','Result','Cumulative P&L'],
+    ...trades.map(t => [
+      t.date, t.direction, t.entry, t.entry_time,
+      t.exit, t.exit_time, t.exit_type,
+      t.pnl_points, t.pnl_percent, t.result, t.cumulative_pnl
+    ])
+  ];
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ORB_Backtest_${summary.symbol}_${summary.period}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+});
